@@ -1,50 +1,110 @@
-let userIdCounter = 1; // Unique ID counter for users
 let deleteTargetRow;
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Load users from local storage
-    loadUsersFromLocalStorage();
+    const dbRequest = indexedDB.open('UserDatabase', 1);
 
-    document.getElementById('addButton').addEventListener('click', function() {
-        document.getElementById('popupForm').style.display = 'flex';
-    });
+    dbRequest.onupgradeneeded = function(event) {
+        const db = event.target.result;
+        const userStore = db.createObjectStore('users', { keyPath: 'id', autoIncrement: true });
+        userStore.createIndex('name', 'name', { unique: false });
+        userStore.createIndex('gender', 'gender', { unique: false });
+        userStore.createIndex('email', 'email', { unique: false });
+        userStore.createIndex('phone', 'phone', { unique: false });
+        userStore.createIndex('city', 'city', { unique: false });
+    };
 
-    document.getElementById('closePopup').addEventListener('click', function() {
-        document.getElementById('popupForm').style.display = 'none';
-    });
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
 
-    document.getElementById('addUserForm').addEventListener('submit', function(event) {
-        event.preventDefault();
+        loadUsers(db);
 
-        const name = document.getElementById('name').value;
-        const gender = document.getElementById('gender').value; // Get gender value
-        const email = document.getElementById('email').value;
-        const phone = document.getElementById('phone').value;
-        const city = document.getElementById('city').value;
+        document.getElementById('addButton').addEventListener('click', function() {
+            document.getElementById('popupForm').style.display = 'flex';
+            document.getElementById('popupForm').classList.add('fade-in', 'slide-in');
+        });
 
-        const tableBody = document.getElementById('userTableBody');
+        document.getElementById('closePopup').addEventListener('click', function() {
+            document.getElementById('popupForm').style.display = 'none';
+        });
 
-        const noUsersRow = document.querySelector('.no-users');
-        if (noUsersRow) {
-            noUsersRow.parentNode.removeChild(noUsersRow);
+        document.getElementById('addUserForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            const name = document.getElementById('name').value;
+            const gender = document.getElementById('gender').value;
+            const email = document.getElementById('email').value;
+            const phone = document.getElementById('phone').value;
+            const city = document.getElementById('city').value;
+
+            const transaction = db.transaction(['users'], 'readwrite');
+            const userStore = transaction.objectStore('users');
+
+            const user = { name, gender, email, phone, city };
+            const request = userStore.add(user);
+
+            request.onsuccess = function() {
+                loadUsers(db);
+                document.getElementById('addUserForm').reset();
+                document.getElementById('popupForm').style.display = 'none';
+            };
+        });
+
+        document.getElementById('closeViewPopup').addEventListener('click', function() {
+            document.getElementById('viewPopup').style.display = 'none';
+        });
+
+        document.getElementById('cancelDelete').addEventListener('click', function() {
+            document.getElementById('deletePopup').style.display = 'none';
+        });
+
+        document.getElementById('confirmDelete').addEventListener('click', function() {
+            deleteUser(db);
+            document.getElementById('deletePopup').style.display = 'none';
+        });
+    };
+
+    dbRequest.onerror = function(event) {
+        console.error('Error opening database:', event.target.errorCode);
+    };
+});
+
+function loadUsers(db) {
+    const tableBody = document.getElementById('userTableBody');
+    tableBody.innerHTML = '';
+
+    const transaction = db.transaction(['users'], 'readonly');
+    const userStore = transaction.objectStore('users');
+
+    let index = 1; // Initialize index for serial number
+
+    userStore.openCursor().onsuccess = function(event) {
+        const cursor = event.target.result;
+
+        if (cursor) {
+            const user = cursor.value;
+            const newRow = document.createElement('tr');
+            newRow.classList.add('user-row');
+            newRow.innerHTML = `
+                <td>${String(index).padStart(2, '0')}</td>
+                <td>${user.name}</td>
+                <td class="gender-cell">${user.gender}</td>
+                <td>${user.city}</td>
+                <td>${user.phone}</td>
+                <td>
+                    <span class="view-btn" onclick="viewUser(${cursor.key})"><img src="assets/view.png" alt="View"></span>
+                    <span class="delete-btn" onclick="confirmDeleteUser(${cursor.key})"><img src="assets/delete.png" alt="Delete"></span>
+                </td>
+                <td style="display: none;">${user.email}</td>
+            `;
+            tableBody.appendChild(newRow);
+
+            index++; // Increment index for next serial number
+            cursor.continue();
+        } else if (!tableBody.hasChildNodes()) {
+            const noUsersRow = document.createElement('tr');
+            noUsersRow.innerHTML = `<td colspan="6" class="no-users">No Users added</td>`;
+            tableBody.appendChild(noUsersRow);
         }
-
-        const newRow = document.createElement('tr');
-        newRow.classList.add('slide-in');
-        newRow.innerHTML = `
-            <td>${String(userIdCounter).padStart(2, '0')}</td>
-            <td>${name}</td>
-            <td class="gender-cell">${gender}</td>
-            <td>${city}</td>
-            <td>${phone}</td>
-            <td>
-                <span class="view-btn" onclick="viewUser(this)"><img src="images/view.png" alt="View"></span>
-                <span class="delete-btn" onclick="confirmDeleteUser(this)"><img src="images/delete.png" alt="Delete"></span>
-            </td>
-            <td style="display: none;">${email}</td>
-        `;
-
-        tableBody.appendChild(newRow);
 
         // Show gender column after adding the first user
         const genderCells = document.querySelectorAll('.gender-cell');
@@ -57,116 +117,110 @@ document.addEventListener('DOMContentLoaded', function() {
         if (genderHeader) {
             genderHeader.style.display = 'table-cell';
         }
-
-        // Save user to local storage
-        saveUserToLocalStorage({ id: userIdCounter, name, gender, email, phone, city });
-
-        userIdCounter++; // Increment the user ID counter
-
-        document.getElementById('addUserForm').reset();
-        document.getElementById('popupForm').style.display = 'none'; // Close the popup form
-    });
-
-    document.getElementById('closeViewPopup').addEventListener('click', function() {
-        document.getElementById('viewPopup').style.display = 'none';
-    });
-
-    document.getElementById('cancelDelete').addEventListener('click', function() {
-        document.getElementById('deletePopup').style.display = 'none';
-    });
-
-    document.getElementById('confirmDelete').addEventListener('click', function() {
-        deleteUser();
-        document.getElementById('deletePopup').style.display = 'none';
-    });
-});
-
-function viewUser(button) {
-    const row = button.parentElement.parentElement;
-    const cells = row.children;
-
-    document.getElementById('viewName').textContent = cells[1].textContent;
-    document.getElementById('viewGender').textContent = cells[2].textContent; // Index adjusted for gender column
-    document.getElementById('viewEmail').textContent = cells[5].textContent;
-    document.getElementById('viewPhone').textContent = cells[4].textContent;
-    document.getElementById('viewCity').textContent = cells[3].textContent;
-
-    document.getElementById('viewPopup').style.display = 'flex';
+    };
 }
 
-function confirmDeleteUser(button) {
-    deleteTargetRow = button.parentElement.parentElement;
-    const userName = deleteTargetRow.children[1].textContent;
-    document.getElementById('deleteUserName').textContent = userName;
-    document.getElementById('deletePopup').style.display = 'flex';
+function viewUser(id) {
+    const dbRequest = indexedDB.open('UserDatabase', 1);
+
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
+        const transaction = db.transaction(['users'], 'readonly');
+        const userStore = transaction.objectStore('users');
+        const request = userStore.get(id);
+
+        request.onsuccess = function(event) {
+            const user = event.target.result;
+
+            document.getElementById('viewName').textContent = user.name;
+            document.getElementById('viewGender').textContent = user.gender;
+            document.getElementById('viewEmail').textContent = user.email;
+            document.getElementById('viewPhone').textContent = user.phone;
+            document.getElementById('viewCity').textContent = user.city;
+
+            document.getElementById('viewPopup').style.display = 'flex';
+        };
+    };
 }
 
-function deleteUser() {
-    if (deleteTargetRow) {
-        const userId = parseInt(deleteTargetRow.children[0].textContent, 10); // Get user ID as number
-        deleteTargetRow.remove();
+function confirmDeleteUser(id) {
+    deleteTargetRow = id;
+    const dbRequest = indexedDB.open('UserDatabase', 1);
+
+    dbRequest.onsuccess = function(event) {
+        const db = event.target.result;
+        const transaction = db.transaction(['users'], 'readonly');
+        const userStore = transaction.objectStore('users');
+        const request = userStore.get(id);
+
+        request.onsuccess = function(event) {
+            const user = event.target.result;
+            const userName = user.name;
+            document.getElementById('deleteUserName').textContent = userName;
+            document.getElementById('deletePopup').style.display = 'flex';
+        };
+    };
+}
+
+function deleteUser(db) {
+    const transaction = db.transaction(['users'], 'readwrite');
+    const userStore = transaction.objectStore('users');
+    const request = userStore.delete(deleteTargetRow);
+
+    request.onsuccess = function() {
         deleteTargetRow = null;
-
-        // Remove user from local storage
-        deleteUserFromLocalStorage(userId);
-
-        const tableBody = document.getElementById('userTableBody');
-        if (tableBody.children.length === 0) {
-            const noUsersRow = document.createElement('tr');
-            noUsersRow.innerHTML = `<td colspan="6" class="no-users">No Users added</td>`;
-            tableBody.appendChild(noUsersRow);
-        }
-    }
+        reloadUsers(db);
+    };
 }
 
-function saveUserToLocalStorage(user) {
-    let users = JSON.parse(localStorage.getItem('users')) || [];
-    users.push(user);
-    localStorage.setItem('users', JSON.stringify(users));
-}
+function reloadUsers(db) {
+    const tableBody = document.getElementById('userTableBody');
+    tableBody.innerHTML = '';
 
-function loadUsersFromLocalStorage() {
-    let users = JSON.parse(localStorage.getItem('users')) || [];
+    const transaction = db.transaction(['users'], 'readonly');
+    const userStore = transaction.objectStore('users');
 
-    if (users.length > 0) {
-        const tableBody = document.getElementById('userTableBody');
-        const noUsersRow = document.querySelector('.no-users');
-        if (noUsersRow) {
-            noUsersRow.parentNode.removeChild(noUsersRow);
-        }
+    let index = 1; // Initialize index for serial number
 
-        users.forEach(user => {
+    userStore.openCursor().onsuccess = function(event) {
+        const cursor = event.target.result;
+
+        if (cursor) {
+            const user = cursor.value;
             const newRow = document.createElement('tr');
-            newRow.classList.add('slide-in');
+            newRow.classList.add('user-row');
             newRow.innerHTML = `
-                <td>${String(user.id).padStart(2, '0')}</td>
+                <td>${String(index).padStart(2, '0')}</td>
                 <td>${user.name}</td>
                 <td class="gender-cell">${user.gender}</td>
                 <td>${user.city}</td>
                 <td>${user.phone}</td>
                 <td>
-                    <span class="view-btn" onclick="viewUser(this)"><img src="images/view.png" alt="View"></span>
-                    <span class="delete-btn" onclick="confirmDeleteUser(this)"><img src="images/delete.png" alt="Delete"></span>
+                    <span class="view-btn" onclick="viewUser(${cursor.key})"><img src="assets/view.png" alt="View"></span>
+                    <span class="delete-btn" onclick="confirmDeleteUser(${cursor.key})"><img src="assets/delete.png" alt="Delete"></span>
                 </td>
                 <td style="display: none;">${user.email}</td>
             `;
-
             tableBody.appendChild(newRow);
-        });
 
-        // Show gender column and header if users exist
+            index++; // Increment index for next serial number
+            cursor.continue();
+        } else if (!tableBody.hasChildNodes()) {
+            const noUsersRow = document.createElement('tr');
+            noUsersRow.innerHTML = `<td colspan="6" class="no-users">No Users added</td>`;
+            tableBody.appendChild(noUsersRow);
+        }
+
+        // Show gender column after adding the first user
         const genderCells = document.querySelectorAll('.gender-cell');
         genderCells.forEach(cell => {
             cell.style.display = 'table-cell';
         });
 
+        // Show gender header in thead
         const genderHeader = document.querySelector('.gender-header');
         if (genderHeader) {
             genderHeader.style.display = 'table-cell';
         }
-
-        // Update userIdCounter to the maximum existing ID plus one
-        userIdCounter = Math.max(...users.map(user => user.id)) + 1;
-    }
+    };
 }
-
